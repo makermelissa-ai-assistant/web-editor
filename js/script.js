@@ -15,7 +15,7 @@ import state from './state.js'
 import { BLEWorkflow } from './workflows/ble.js';
 import { USBWorkflow } from './workflows/usb.js';
 import { WebWorkflow } from './workflows/web.js';
-import { isValidBackend, getBackendWorkflow, getWorkflowBackendName } from './workflows/workflow.js';
+import { isValidBackend, getBackendWorkflow, getWorkflowBackendName, SHOW_CONNECT_SWITCH } from './workflows/workflow.js';
 import { ButtonValueDialog, MessageModal } from './common/dialogs.js';
 import { isLocal, isMdns, isIp, switchUrl, getUrlParam } from './common/utilities.js';
 import { Settings } from './common/settings.js';
@@ -218,7 +218,10 @@ function setSaved(saved) {
 }
 
 async function checkConnected() {
-    if (!workflow || !workflow.connectionStatus()) {
+    // Loop so the user can bounce back to the workflow chooser via the
+    // "← Choose different connection" button on each per-workflow
+    // connect dialog (issue #373).
+    while (!workflow || !workflow.connectionStatus()) {
         let connType = await chooseConnection();
         if (!connType) {
             return false;
@@ -234,11 +237,18 @@ async function checkConnected() {
 
         if (!workflow.connectionStatus()) {
             // Display the appropriate connection dialog
-            await workflow.showConnect(getDocState());
+            const result = await workflow.showConnect(getDocState());
+            if (result === SHOW_CONNECT_SWITCH) {
+                // User wants to pick a different transport. Drop the
+                // workflow we just loaded and re-run the chooser.
+                workflow = null;
+                continue;
+            }
         } else if (workflow.type === CONNTYPE.Web) {
             // We're connected, local, and using Web Workflow
             await workflow.showInfo(getDocState());
         }
+        break;
     }
 
     return true;
@@ -691,7 +701,14 @@ document.addEventListener('DOMContentLoaded', async (event) => {
                 await showMessage(returnVal);
             } else {
                 loadEditor();
-                await workflow.showConnect(getDocState());
+                const result = await workflow.showConnect(getDocState());
+                // User asked to switch transports from inside the per-workflow
+                // connect dialog (issue #373) — fall through to the generic
+                // chooser-driven flow.
+                if (result === SHOW_CONNECT_SWITCH) {
+                    workflow = null;
+                    await checkConnected();
+                }
             }
         }
     } else {

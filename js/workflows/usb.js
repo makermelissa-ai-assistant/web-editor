@@ -51,7 +51,9 @@ class USBWorkflow extends Workflow {
         super.onConnected(e);
     }
 
-    async onDisconnected(e, reconnect = true) {
+    // See base Workflow.onDisconnected for why reconnect defaults to false
+    // (issue #373).
+    async onDisconnected(e, reconnect = false) {
         if (this.reader) {
             try {
                 await this.reader.cancel();

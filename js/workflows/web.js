@@ -64,7 +64,9 @@ class WebWorkflow extends Workflow {
         //this.connIntervalId = setInterval(this._checkConnection.bind(this), PING_INTERVAL_MS);
     }
 
-    async onDisconnected(e, reconnect = true) {
+    // See base Workflow.onDisconnected for why reconnect defaults to false
+    // (issue #373).
+    async onDisconnected(e, reconnect = false) {
         if (this.connIntervalId) {
             clearInterval(this.connIntervalId);
             this.connIntervalId = null;
@@ -83,18 +85,23 @@ class WebWorkflow extends Workflow {
     }
 
     async showConnect(documentState) {
-        const p = this.connectDialog.open();
+        // Open the dialog via the base helper so the shared
+        // "← Choose different connection" button gets wired up too
+        // (issue #373).
+        const p = this._openConnectDialog();
         const modal = this.connectDialog.getModal();
         const deviceLink = modal.querySelector("#device-link");
-        deviceLink.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            let clickedItem = event.target;
-            if (clickedItem.tagName.toLowerCase() != "a") {
-                clickedItem = clickedItem.parentNode;
-            }
-            switchDevice(new URL(clickedItem.href).host, documentState);
-        });
+        if (deviceLink) {
+            deviceLink.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                let clickedItem = event.target;
+                if (clickedItem.tagName.toLowerCase() != "a") {
+                    clickedItem = clickedItem.parentNode;
+                }
+                switchDevice(new URL(clickedItem.href).host, documentState);
+            });
+        }
         return await p;
     }
 

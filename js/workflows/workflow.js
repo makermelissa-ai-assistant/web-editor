@@ -5,7 +5,13 @@ import {FileHelper} from '../common/file.js';
 import {ButtonValueDialog, UnsavedDialog} from '../common/dialogs.js';
 import {FileDialog, FILE_DIALOG_OPEN, FILE_DIALOG_SAVE} from '../common/file_dialog.js';
 import {CONNTYPE, CONNSTATE} from '../constants.js';
-import {plotValues} from '../common/plotter.js'
+import {plotValues} from '../common/plotter.js';
+
+// Sentinel returned by showConnect() when the user clicks "Choose different
+// connection" in a workflow's connect dialog. The caller (script.js) detects
+// this and pops the workflow-chooser dialog, allowing the user to switch
+// between BLE / USB / Web without first having to manually disconnect.
+const SHOW_CONNECT_SWITCH = Symbol("showConnect.switch");
 
 /*
  * This class will encapsulate all of the common workflow-related functions
@@ -126,9 +132,26 @@ except ImportError:
         };
     }
 
-    async onDisconnected(e, reconnect = true) {
+    // NOTE: reconnect defaults to false (changed in #373).
+    //
+    // Auto-reconnecting on every transport-level disconnect (USB unplug,
+    // websocket close, BLE GATT drop, tab returning from background, etc.)
+    // caused two visible bugs:
+    //   * The connection state could flip-flop between "connected" and
+    //     "reconnecting" without the UI ever reflecting "disconnected",
+    //     so the Disconnect button stayed labeled "Disconnect" while the
+    //     transport was actually dead (issue #373).
+    //   * If the device was physically gone, the auto-reconnect attempt
+    //     could throw (e.g. `NetworkError: The device has been lost.`)
+    //     and leave the workflow in a half-initialized state.
+    //
+    // Callers that genuinely want to retry (e.g. a user-initiated reconnect)
+    // can still pass reconnect=true explicitly.
+    async onDisconnected(e, reconnect = false) {
         console.log("onDisconnected called in workflow");
-        this.debugLog("disconnected");
+        if (this.debugLog) {
+            this.debugLog("disconnected");
+        }
         this.updateConnected(CONNSTATE.disconnected);
         // Update Common UI Elements
         if (this.disconnectCallback) {
@@ -217,8 +240,30 @@ except ImportError:
         this.terminalTitle.title = title;
     }
 
+    // Open the connect dialog and wire shared handlers (the optional
+    // "← Choose different connection" button on each per-workflow connect
+    // dialog). Returns the open() Promise so subclasses can attach their own
+    // listeners on this.connectDialog.getModal() *before* awaiting it.
+    _openConnectDialog() {
+        const openPromise = this.connectDialog.open();
+        try {
+            const modal = this.connectDialog.getModal();
+            const switchBtn = modal.querySelector("[data-switch-connection-type]");
+            if (switchBtn) {
+                switchBtn.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.connectDialog._returnValue(SHOW_CONNECT_SWITCH);
+                });
+            }
+        } catch (err) {
+            console.warn("Unable to wire switch-connection-type button:", err);
+        }
+        return openPromise;
+    }
+
     async showConnect(documentState) {
-        return await this.connectDialog.open();
+        return await this._openConnectDialog();
     }
 
     async runCurrentCode() {
@@ -428,5 +473,6 @@ export {
     Workflow,
     isValidBackend,
     getBackendWorkflow,
-    getWorkflowBackendName
+    getWorkflowBackendName,
+    SHOW_CONNECT_SWITCH
 };
